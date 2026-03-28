@@ -1,0 +1,8 @@
+{
+  "name": "hive",
+  "description": "Bio-inspired swarm orchestrator for Claude Code. Breaks tasks into parallel subtasks, coordinates agents through stigmergy, learns across sessions with pheromone scoring, and scales concurrency adaptively.",
+  "author": {
+    "name": "Jack Nowlan",
+    "email": "jack@cipherandrow.com"
+  }
+}
