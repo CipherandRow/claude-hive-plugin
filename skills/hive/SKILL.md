@@ -228,6 +228,30 @@ expected_rate = total / estimated_minutes
 - completions > expected * 1.3: Scale up (headroom detected)
 - completions < expected * 0.6: Scale down (approaching limits)
 
+### Agent Efficiency Rules
+
+Agents must be **directed, not exploratory**. Wasted tool calls burn context and time.
+
+**Agent type selection:**
+- Use `general-purpose` agents (default) for tasks that require action (fixes, writes, analysis with output)
+- Use `Explore` agents ONLY when paths/locations are genuinely unknown and broad search is needed
+- NEVER use `Explore` for files in known locations (e.g., `~/.claude/`, project config, files referenced in memory or shared findings)
+- For read-heavy tasks on known files, use `general-purpose` with explicit file paths in the prompt
+
+**Tool-call budget:** Include a tool-call budget in every agent prompt:
+```
+Tool budget: ~{N} tool calls max. Use direct reads (Read, Glob) over broad exploration.
+If you know the file path, read it directly. Do not search for files you already know the location of.
+```
+Guideline: research agents should aim for 5-10 tool calls. Fix agents 10-20. Anything over 25 indicates waste.
+
+**Path injection:** When the orchestrator knows relevant file paths (from memory, prior agents, or shared findings), inject them directly into the agent prompt:
+```
+## Known Paths (read these directly, do not search for them)
+- Config: /path/to/config.ts
+- Tests: /path/to/tests/
+```
+
 ### Agent Prompts
 
 Every agent MUST include these two blocks:
@@ -276,9 +300,10 @@ Maintain `hive-log-{date}.md` at workspace root. Update after every agent:
 # Hive Log -- {task}
 Strategy: {strategy} | Protocol: {protocol} | Mode: {mode}
 ## Wave 1 (concurrency: 5, reserve: 2)
-- [DONE] Task 1 -- result summary (45s, HIGH)
-- [FAIL] Task 2 -- error (32s)
+- [DONE] Task 1 -- result summary (45s, HIGH, 8 calls)
+- [FAIL] Task 2 -- error (32s, 4 calls)
 - [TTL] Task 3 -- timeout, reassigned
+- [WARN] Task 4 -- result ok but 26 calls (inefficient, flag for review)
 ```
 
 ### Execution Trace (--verbose)
@@ -403,6 +428,9 @@ Playbook entry format:
 - One clear task per agent
 - Sonnet for grunt work, Opus for synthesis/analysis
 - Every agent MUST include self-validation + stigmergy blocks
+- Every agent MUST include tool-call budget and known paths (see Agent Efficiency Rules)
 - Anthropic ceiling: 4 specialists x 5 tasks = 20 work units max
 - Run `/clear` between unrelated swarm runs
 - For overnight: start at 8+ concurrency. For interactive: start at 3-4.
+- **Efficiency tracking**: Log tool calls per agent in the running log. Flag agents exceeding 25 calls for review. Pattern: `(45s, HIGH, 8 calls)` in log entries.
+- **Prefer precision over exploration**: If the orchestrator can answer a sub-question itself in 1-2 tool calls, do it inline instead of spawning an agent.
