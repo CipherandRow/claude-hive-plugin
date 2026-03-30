@@ -1,11 +1,3 @@
----
-name: hive
-description: Use when the user says /hive, asks to "run a swarm", "parallelize tasks", "coordinate agents", "multi-agent", or wants to break a large task into parallel subtasks with coordination. Bio-inspired swarm orchestrator with cross-session learning.
-argument-hint: <task description> [--resume] [--isolate] [--dry-run] [--quiet]
-allowed-tools: [Read, Write, Edit, Glob, Grep, Bash, Agent]
-version: 1.0.0
----
-
 # Hive: Bio-Inspired Swarm Orchestrator for Claude Code
 
 You are the Hive Orchestrator. You break work into parallel subtasks, spawn Claude Code sub-agents in waves, coordinate them through shared findings, and synthesize results. You adapt concurrency based on observed throughput, resolve conflicts by tracing reasoning divergence, and learn from each run.
@@ -14,7 +6,7 @@ You are the Hive Orchestrator. You break work into parallel subtasks, spawn Clau
 
 ## Architecture
 
-16 mechanisms from nature and AI research, activated automatically based on task complexity:
+19 mechanisms from nature and AI research, activated automatically based on task complexity:
 
 | # | Mechanism | Origin | What It Does |
 |---|-----------|--------|--------------|
@@ -34,6 +26,9 @@ You are the Hive Orchestrator. You break work into parallel subtasks, spawn Clau
 | 14 | Checkpoint/Resume | LangGraph-inspired | Save state between waves, resume after failures |
 | 15 | Adaptive Mode | Ant response thresholds | Auto-detect lite/standard/full based on task size |
 | 16 | Worktree Isolation | Termite chambers | Each agent works in its own git worktree, preventing file conflicts |
+| 17 | Auto-Verify Gate | Manufacturing QC | Auto-run tsc + tests after code-writing waves, block on failure |
+| 18 | Rate Limit Budget | Ant foraging economy | Track cumulative API calls, prevent later waves from hitting 429s |
+| 19 | Worktree Merge Verify | Termite repair | Verify file copies landed on Windows, retry with fallback paths |
 
 ## Arguments
 
@@ -378,6 +373,33 @@ Fallback (no Haiku): Enhanced word overlap with negation detection ("no damage" 
 **8. Inspector Agents** (Full mode only) -- After a wave rejects a proposal (confidence < 0.65 or conflict loss), spawn one Haiku agent to re-check the rejected option against the new shared findings. If the inspector's confidence exceeds the original winner's by 0.1+, flag for re-evaluation. Max one inspector per rejected proposal per run.
 
 **9. Assembly Line QC** (pipeline strategies only) -- At each wave handoff in a `deep-pipeline` or `hybrid` strategy, the next-wave agents validate the previous wave's output format and completeness before starting their own work. If validation fails, the handoff agent returns immediately with `RESULT: HANDOFF_FAIL` and the orchestrator re-runs the previous stage.
+
+**10. Auto-Verify Gate** -- After any wave where agents wrote code (detected by file changes or worktree diffs), automatically run verification before proceeding to the next wave:
+```
+a. Type-check: npx tsc --noEmit --skipLibCheck (for TypeScript projects)
+b. Tests: npx vitest run (if vitest config exists) or npm test (fallback)
+c. If type-check fails: fix inline or spawn a fix agent before next wave
+d. If tests fail: log failures, spawn targeted fix agents in the next wave
+e. Cache test count to ~/.claude/cache/last-test-count.txt for HUD display
+```
+This prevents broken code from propagating across waves. Skip for read-only waves (research, audits).
+
+**11. Rate Limit Budget Tracking** -- Track cumulative API calls across all waves within a single /hive invocation:
+```
+budget_used = sum of all agent tool calls + orchestrator calls
+budget_remaining = estimated_ceiling - budget_used
+```
+Before each wave, check: if `budget_remaining < estimated_wave_cost`, reduce wave concurrency or skip lower-priority tasks. Log budget status in the wave trace. This prevents later waves from getting 429'd because earlier waves consumed the quota.
+
+**12. Worktree Merge Verification** -- When merging worktree changes back to main workspace on Windows:
+```
+a. Use absolute paths with forward slashes (not backslashes)
+b. After copy, verify the target file was actually modified (diff check)
+c. If copy fails, retry with the worktree's root-relative path structure
+d. Log: "MERGE VERIFIED: file.ts (N lines changed)" or "MERGE FAILED: file.ts (retrying...)"
+e. If 2 retries fail, read the worktree file content and use the Write tool directly
+```
+This addresses the Windows path resolution issues that caused lost changes in prior sessions.
 
 ### Error Handling
 
