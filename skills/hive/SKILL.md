@@ -452,7 +452,29 @@ One JSON line to `~/.claude/hive-history.jsonl` (create the file if it does not 
 
 **Pruning:** Keep last 50 entries.
 
-### 10b. Update Playbook
+### 10b. Sync to Traction Agent
+
+After any hive run that produces **research findings, competitive intelligence, pricing analysis, market data, or strategic decisions**, automatically update the traction agent's context file so `/traction` has the latest data.
+
+**When to sync:** The run's `task_type` is `research` and the findings contain actionable GTM data (pricing, competitors, verticals, customer insights, fraud statistics, market sizing).
+
+**How to sync:**
+1. Read `C:/Users/13177/Desktop/business-concourse-worker/benchmark/traction-outputs/hive-intel.md` (create if missing)
+2. Append a dated entry with the key findings:
+```markdown
+## [DATE] — [Hive task summary]
+- Key finding 1
+- Key finding 2
+- Implication for traction: [how this changes outreach/positioning/pricing]
+```
+3. Keep file under 200 lines (prune oldest entries when exceeded)
+4. Log: `TRACTION SYNC: appended N findings to hive-intel.md`
+
+The traction agent reads `hive-intel.md` at the start of every run (Phase 1) to incorporate the latest research into content generation. This creates a feedback loop: hive researches, traction acts on it.
+
+**Skip sync when:** task_type is `qa`, `implementation`, or the run produced no research findings.
+
+### 10c. Update Playbook
 
 Record effective approaches with time-decay: `relevance = confidence * (0.95 ^ days)`. Inject entries with relevance > 0.3 into future agent prompts. Keep under 30 entries.
 
