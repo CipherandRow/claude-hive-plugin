@@ -50,8 +50,8 @@ Count subtasks and auto-select the mode. This prevents bloat on simple tasks.
 | Subtasks | Mode | What Runs | What's Skipped |
 |----------|------|-----------|----------------|
 | 1-3 | **Lite** | Spawn agents, basic error handling, synthesis | Pre-flight, stigmergy, quorum, checkpoints, playbook, velocity scaling, worktree isolation |
-| 4-8 | **Standard** | Lite + pre-flight, stigmergy, checkpoints, playbook, velocity scaling, worktree isolation (if file-writing) | Quorum (not useful with <3 agents on same subtask) |
-| 9+ | **Full** | Everything, all 16 mechanisms | Nothing skipped |
+| 4-8 | **Standard** | Lite + pre-flight, stigmergy, checkpoints, playbook, velocity scaling, worktree isolation (if file-writing), quorum + cross-inhibition (if redundancy active) | Quorum/cross-inhibition only skipped when no redundant subtasks exist |
+| 9+ | **Full** | Everything, all 19 mechanisms | Nothing skipped |
 
 Auto-detect, don't ask. Log which mode was selected.
 
@@ -119,6 +119,28 @@ Display: `Strategy: fan-out-gather | 8 scouts -> 1 synthesizer | Protocol: conse
 2. Group into waves (dependencies between waves, parallelism within)
 3. **Reserve Pool**: Hold back ~25% of concurrency as reserve. Release reserve when: (a) all planned agents are queued and none are waiting, (b) a wave has 0 failures and velocity is above expected rate, or (c) the final wave needs extra capacity. Reserve is never released during error recovery.
 4. If >8 agents planned, confirm with user: "This will launch ~{N} agents. Proceed?"
+
+### Redundancy Planning (activates quorum, cross-inhibition, and inspectors)
+
+Not every subtask should have redundancy. Apply it selectively to **critical subtasks** where a wrong answer is expensive:
+
+**Auto-detect critical subtasks** — a subtask is critical if it involves:
+- Architecture decisions (which approach to take)
+- Security assessments (is this safe?)
+- Numerical analysis (pricing, financial calculations)
+- Conflicting prior evidence (history shows disagreement on this topic)
+
+**For each critical subtask, assign 2-3 agents instead of 1.** Each agent works independently (no shared context between them for that subtask). This activates:
+- **Semantic Quorum (6)**: If 2 of 3 agree, commit early
+- **Cross-Inhibition (11)**: Higher-confidence proposals dampen weaker ones
+- **Reasoning Tree Conflicts (3)**: If agents disagree, find the exact divergence point
+- **Inspector Agents (12)**: If a proposal is rejected, a cheap inspector re-checks it
+
+**Budget rule**: Redundant agents count toward the total. A plan with 5 subtasks where 2 are critical (3 agents each) = 5 + 4 = 9 agent slots. Apply the >8 confirmation rule.
+
+**Non-critical subtasks**: Keep at 1 agent (efficient, no redundancy needed).
+
+Log: `Plan: 5 tasks (2 critical × 3 agents, 3 standard × 1 agent) = 9 agents total`
 
 ## Step 7: Pre-Flight
 
@@ -368,7 +390,7 @@ Fallback (no Haiku): Enhanced word overlap with negation detection ("no damage" 
 
 **6. Velocity metrics** -- Log completions/min, scale action, confidence, budget remaining.
 
-**7. Backpressure** -- If shared board has >20 unread findings since the last summarization, throttle spawning and spawn a Haiku summarizer to condense findings before the next wave. Reset the counter after summarization.
+**7. Backpressure** -- If shared board has >8 unread findings since the last summarization, throttle spawning and spawn a Haiku summarizer to condense findings before the next wave. Reset the counter after summarization. (Threshold lowered from 20 to 8 based on production data showing most runs produce 4-12 findings total.)
 
 **8. Inspector Agents** (Full mode only) -- After a wave rejects a proposal (confidence < 0.65 or conflict loss), spawn one Haiku agent to re-check the rejected option against the new shared findings. If the inspector's confidence exceeds the original winner's by 0.1+, flag for re-evaluation. Max one inspector per rejected proposal per run.
 
