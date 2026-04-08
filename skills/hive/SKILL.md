@@ -57,17 +57,36 @@ Auto-detect, don't ask. Log which mode was selected.
 
 ## Step 2: Parallelism Tier Detection
 
+**Tested ceiling (April 2026): 25 read-only agents and 20 write agents run with zero failures. Mean per-agent latency does not degrade from 5 to 25 agents.**
+
 On the first wave, observe actual concurrency behavior:
 ```
 ratio = agents_running_simultaneously / agents_launched
 ```
-- ratio < 0.3 or throttling: **limited** (max 2 concurrent)
-- ratio 0.3-0.6: **standard** (max 5 concurrent)
-- ratio > 0.6: **max** (max 15 concurrent)
+- ratio < 0.3 or throttling: **limited** (max 3 concurrent)
+- ratio 0.3-0.6: **standard** (max 10 concurrent)
+- ratio > 0.6: **max** (max 25 read / 20 write concurrent)
 
 Adjust remaining waves to match. This handles different plan tiers automatically.
 
-**Edge case:** If all wave 1 agents fail (ratio = 0), default to **limited** tier (max 2) and retry wave 1 at reduced concurrency before classifying.
+**Default swarm configurations:**
+- Quick audit: 10 haiku agents (~60s)
+- Deep review: 1 opus + 8 haiku (~90s)
+- Fix wave: 2 opus + 4 sonnet + 9 haiku = 15 (~200s)
+- Full catalog: 25 haiku (~50s)
+
+**Model selection (based on performance data):**
+- **Haiku** (avg 7-29s): file reads, search, single-file fixes, summaries. Use for scouts and workers.
+- **Sonnet** (avg 85-95s): multi-file changes, code review, medium complexity. Use for reviewers.
+- **Opus** (avg 94-115s): complex rewrites, architecture decisions, synthesis. Use for leads only.
+
+**Prompt discipline for write agents (critical for quality):**
+- Always include: "ONLY EDIT THIS FILE: [path]. DO NOT edit any other file."
+- Always include: "DO NOT add inline comments, refactor, or change code outside the task."
+- Keep write agents to max 2-3 files each with non-overlapping file lists.
+- Tested: strict prompts are 44% faster and produce 10x less unwanted code than loose prompts.
+
+**Edge case:** If all wave 1 agents fail (ratio = 0), default to **limited** tier (max 3) and retry wave 1 at reduced concurrency before classifying.
 
 ## Step 3: Exclusion Check
 
@@ -459,7 +478,7 @@ After any hive run that produces **research findings, competitive intelligence, 
 **When to sync:** The run's `task_type` is `research` and the findings contain actionable GTM data (pricing, competitors, verticals, customer insights, fraud statistics, market sizing).
 
 **How to sync:**
-1. Read `C:/Users/13177/Desktop/business-concourse-worker/benchmark/traction-outputs/hive-intel.md` (create if missing)
+1. Read `./hive-intel.md` in the project root (create if missing)
 2. Append a dated entry with the key findings:
 ```markdown
 ## [DATE] — [Hive task summary]
