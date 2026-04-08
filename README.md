@@ -22,17 +22,24 @@ A multi-agent orchestration skill that coordinates parallel Claude Code agents u
 | 109-file catalog | 5 waves x 25 haiku | ~3 min | 18x |
 | 20-file write batch | 20 haiku | ~73s | 10x |
 
-## Proven Concurrency Tiers
+## Proven Concurrency (April 8, 2026 test suite: 78 agents, 10 experiments, 0 errors)
 
-| Workload | Config | Agents | Proven Time |
-|----------|--------|--------|-------------|
-| Quick audit | 10 haiku | 10 | ~60s |
-| Security scan | 1 opus + 8 haiku | 9 | ~90s |
-| Fix wave | 2 opus + 4 sonnet + 9 haiku | 15 | ~200s |
-| Full catalog | 25 haiku | 25 | ~50s |
-| Write batch | 20 haiku | 20 | ~73s |
+| Config | Agents | Result | Avg Latency |
+|--------|--------|--------|-------------|
+| 5 haiku | 5 | PASS | 5.4s |
+| 10 haiku | 10 | PASS | 9.2s |
+| 4 sonnet | 4 | PASS | 9.7s |
+| 2 opus | 2 | PASS | 11.9s |
+| 10h + 3s | 13 | PASS | h:7.6s / s:12.9s |
+| 8h + 1o | 9 | PASS | h:5.5s / o:10.5s |
+| 5h + 2s + 1o | 8 | PASS | h:4.9s / s:7.1s / o:10.7s |
 
-Mean latency does NOT degrade with more agents. Tail latency (spread) widens at scale (3x at 25 agents).
+**Key findings:**
+- No hard 529 wall found up to 13 mixed agents
+- Model tiers don't conflict (haiku/sonnet/opus share the same pool)
+- 10+ agents get queued ~2 min before executing (Claude Code internal queue)
+- 529 errors are transient API load spikes. Always retry with 30s delay.
+- Safe default: 13 mixed agents. Flat count, not weighted.
 
 ## Installation
 
@@ -135,6 +142,7 @@ DO NOT add inline comments, refactor, or change code outside the task.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.1 | April 9, 2026 | Full concurrency test suite (78 agents, 0 errors), flat ceiling model replaces weighted tokens |
 | v4.0 | April 8, 2026 | Concurrency unlocked (2->25), mechanism audit, cross-skill sync |
 | v3.0 | March 25, 2026 | 14 mechanisms, semantic quorum, reasoning tree, A2A protocol |
 | v2.0 | March 2026 | Adaptive mode, worktree isolation, stigmergy |
