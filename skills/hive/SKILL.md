@@ -6,7 +6,7 @@ You are the Hive Orchestrator. You break work into parallel subtasks, spawn Clau
 
 ## Architecture
 
-19 mechanisms from nature and AI research, activated automatically based on task complexity:
+27 mechanisms from nature, AI research, and agent systems engineering, activated automatically based on task complexity:
 
 | # | Mechanism | Origin | What It Does |
 |---|-----------|--------|--------------|
@@ -29,6 +29,14 @@ You are the Hive Orchestrator. You break work into parallel subtasks, spawn Clau
 | 17 | Auto-Verify Gate | Manufacturing QC | Auto-run tsc + tests after code-writing waves, block on failure |
 | 18 | Rate Limit Budget | Ant foraging economy | Track cumulative API calls, prevent later waves from hitting 429s |
 | 19 | Worktree Merge Verify | Termite repair | Verify file copies landed on Windows, retry with fallback paths |
+| 20 | Structured Agent Protocol | Agent SDK research | JSON-schema contracts for agent I/O, eliminating parse failures |
+| 21 | Adaptive Thinking Budget | Cognitive load theory | Scale reasoning depth per-agent based on task complexity class |
+| 22 | Context Deduplication | Prompt caching research | Minimize redundant context across sub-agents via shared preambles |
+| 23 | Dynamic Tool Loading | MCP scaling patterns | Load only relevant tools per agent instead of full toolset |
+| 24 | Hot Reassignment | Ant task switching | Reassign idle/stuck agent slots to blocked high-priority tasks |
+| 25 | Extended Reasoning Gates | Chain-of-thought research | Trigger deep reasoning mode for cross-service debugging and architecture |
+| 26 | Muscle Memory | Procedural memory research | Agent-level technique learning persists across sessions with reinforcement decay |
+| 27 | Debug Trace | Distributed tracing (Jaeger) | Structured JSONL event log for every mechanism activation, decision, and outcome |
 
 ## Arguments
 
@@ -49,44 +57,116 @@ Count subtasks and auto-select the mode. This prevents bloat on simple tasks.
 
 | Subtasks | Mode | What Runs | What's Skipped |
 |----------|------|-----------|----------------|
-| 1-3 | **Lite** | Spawn agents, basic error handling, synthesis | Pre-flight, stigmergy, quorum, checkpoints, playbook, velocity scaling, worktree isolation |
-| 4-8 | **Standard** | Lite + pre-flight, stigmergy, checkpoints, playbook, velocity scaling, worktree isolation (if file-writing), quorum + cross-inhibition (if redundancy active) | Quorum/cross-inhibition only skipped when no redundant subtasks exist |
-| 9+ | **Full** | Everything, all 19 mechanisms | Nothing skipped |
+| 1-3 | **Lite** | Spawn agents, basic error handling, synthesis, structured output (20), adaptive thinking (21), debug trace (27) | Pre-flight, stigmergy, quorum, checkpoints, playbook, velocity scaling, worktree isolation, hot reassignment, context dedup, dynamic tool loading, calibration |
+| 4-8 | **Standard** | Lite + pre-flight, stigmergy, checkpoints, playbook, velocity scaling, worktree isolation (if file-writing), quorum + cross-inhibition (if redundancy active), context dedup (22), hot reassignment (24), extended reasoning gates (25), muscle memory (26), calibration (9b) | Dynamic tool loading only if <20 MCP tools |
+| 9+ | **Full** | Everything, all 27 mechanisms | Nothing skipped |
 
 Auto-detect, don't ask. Log which mode was selected.
 
-## Step 2: Parallelism Tier Detection
+## Step 2: Concurrency Profile (adaptive, learns from every run)
 
-**Tested ceiling (April 2026): 25 read-only agents and 20 write agents run with zero failures. Mean per-agent latency does not degrade from 5 to 25 agents.**
+The orchestrator maintains a concurrency profile at `~/.claude/projects/*/memory/swarm_rate_profile.json`. This profile is updated after every run with observed successes and failures per model mix.
 
-On the first wave, observe actual concurrency behavior:
+### Concurrency Profile Format
+```json
+{
+  "model_ceilings": {
+    "haiku_only": { "proven_max": 25, "last_529_at": null, "last_tested": "2026-04-07" },
+    "sonnet_only": { "proven_max": 5, "last_529_at": null, "last_tested": null },
+    "opus_only": { "proven_max": 3, "last_529_at": null, "last_tested": null },
+    "haiku_with_sonnet": { "proven_max": 8, "last_529_at": 11, "last_tested": "2026-04-08", "notes": "9h+2s=529 on sonnet" },
+    "haiku_with_opus": { "proven_max": 10, "last_529_at": null, "last_tested": "2026-04-07" },
+    "mixed_all": { "proven_max": 15, "last_529_at": null, "last_tested": "2026-04-07" }
+  },
+  "token_weight": { "haiku": 1.0, "sonnet": 3.0, "opus": 5.0 },
+  "budget_ceiling": 25
+}
 ```
-ratio = agents_running_simultaneously / agents_launched
-```
-- ratio < 0.3 or throttling: **limited** (max 3 concurrent)
-- ratio 0.3-0.6: **standard** (max 10 concurrent)
-- ratio > 0.6: **max** (max 25 read / 20 write concurrent)
 
-Adjust remaining waves to match. This handles different plan tiers automatically.
+### How to Use the Profile
 
-**Default swarm configurations:**
-- Quick audit: 10 haiku agents (~60s)
-- Deep review: 1 opus + 8 haiku (~90s)
-- Fix wave: 2 opus + 4 sonnet + 9 haiku = 15 (~200s)
-- Full catalog: 25 haiku (~50s)
+**Before launching a wave**, count total agents regardless of model tier.
 
-**Model selection (based on performance data):**
-- **Haiku** (avg 7-29s): file reads, search, single-file fixes, summaries. Use for scouts and workers.
-- **Sonnet** (avg 85-95s): multi-file changes, code review, medium complexity. Use for reviewers.
-- **Opus** (avg 94-115s): complex rewrites, architecture decisions, synthesis. Use for leads only.
+**Launch rule:** `total_agents <= 13` (proven safe default).
 
-**Prompt discipline for write agents (critical for quality):**
-- Always include: "ONLY EDIT THIS FILE: [path]. DO NOT edit any other file."
-- Always include: "DO NOT add inline comments, refactor, or change code outside the task."
-- Keep write agents to max 2-3 files each with non-overlapping file lists.
-- Tested: strict prompts are 44% faster and produce 10x less unwanted code than loose prompts.
+April 8 test suite (78 agents, 10 experiments, zero 529 errors) proved:
+- Model tier does NOT affect concurrency. All tiers share the same pool without conflict.
+- The weighted token model was wrong. Flat agent count is the correct predictor.
+- 529 errors are transient API load spikes, not hard ceilings. Always retry with 30s delay.
+- 10+ agents get queued for ~2 min before executing. Once running, latency is stable.
 
-**Edge case:** If all wave 1 agents fail (ratio = 0), default to **limited** tier (max 3) and retry wave 1 at reduced concurrency before classifying.
+**Proven configurations (all PASS):**
+- 13 mixed (10h + 3s): PASS, largest tested
+- 9 mixed (8h + 1o): PASS
+- 8 mixed (5h + 2s + 1o): PASS (real-world hive pattern)
+- 10 haiku: PASS
+- 4 sonnet: PASS
+- 2 opus: PASS
+
+**Latency by model (lightweight read tasks):**
+- Haiku: 4-9s avg
+- Sonnet: 6-17s avg
+- Opus: 10-12s avg
+
+### Calibration Runs (automatic, every 10th run)
+
+Every 10th hive run (check `hive-history.jsonl` count), run a **micro calibration** before the main task:
+1. Determine which model mix the current task needs
+2. Launch a 3-agent test wave with that mix (e.g., 2 haiku + 1 sonnet)
+3. If all 3 succeed: record success, proceed with full plan
+4. If any hit 529: halve the planned concurrency, record the failure, proceed conservatively
+5. Log: `CALIBRATION: {mix} x{count} = {result} (weighted: {load})`
+
+This takes ~10-30 seconds and prevents full-wave 529 crashes.
+
+### On 529 Error (reactive learning)
+
+When any agent hits 529:
+1. Record the failure in the concurrency profile: `model_ceilings[mix].last_529_at = current_agent_count`
+2. Set `proven_max` to `current_count - 2` (conservative backoff)
+3. Halve remaining wave concurrency
+4. Wait 30s before retrying
+5. Log: `529 HIT: {mix} at {count} agents. Ceiling lowered to {new_max}. Waiting 30s.`
+
+### On Clean Wave (positive learning)
+
+When a full wave completes with zero 529s:
+1. If `agent_count > model_ceilings[mix].proven_max`: raise the ceiling
+2. Set `proven_max = agent_count`
+3. Log: `CEILING RAISED: {mix} proven at {count} (was {old_max})`
+
+### Over-Ceiling Handling (when total agents > 13)
+
+If the planned wave exceeds 13 agents, split into sub-waves:
+1. Launch first 13 agents (mix of all tiers is fine)
+2. Wait for 50%+ to complete
+3. Launch remaining agents
+4. No need to stagger by model tier (April 8 tests proved tiers don't conflict)
+
+For 529 errors: wait 30s and retry. These are transient API load spikes, not permanent limits.
+Do NOT reduce concurrency permanently after a single 529. Log it and retry.
+
+### Default Configurations (data-driven from April 8 test suite)
+- Quick audit: 10 haiku (~60s total)
+- Security scan: 1 opus + 8 haiku = 9 agents (~90s total)
+- Fix wave: 1 opus + 3 sonnet + 9 haiku = 13 agents (~3 min total incl. queue)
+- Full catalog: 13 haiku (~2.5 min total incl. queue)
+- Hivesim personas: 12 haiku per wave (~2.5 min total incl. queue)
+- Boost: 3 sonnet (~20s total, well within limits)
+
+### Model Selection Rules (proven by timing data)
+- **Haiku** (avg 7-29s, 1-5 tool calls): file reads, grep, single-file fixes, summaries
+- **Sonnet** (avg 85-95s, 20-25 tool calls): multi-file pattern fixes, code review, medium complexity
+- **Opus** (avg 94-115s, 10-12 tool calls): complex rewrites, architecture decisions, synthesis
+
+### Prompt Discipline (proven by A/B test)
+- Write agents MUST include: "ONLY EDIT THIS FILE: [path]. DO NOT edit any other file."
+- Write agents MUST include: "DO NOT add inline comments, refactor, or change code outside the task."
+- Keep write agents to max 2-3 files each. Assign non-overlapping file lists.
+- Strict prompts are 44% faster per-agent and produce 10x less code bloat than loose prompts.
+
+### Edge case
+If all wave 1 agents fail (ratio = 0), default to 3 agents and retry with smallest model (haiku). If that fails, try 1 agent. If single agent fails, abort and report API outage.
 
 ## Step 3: Exclusion Check
 
@@ -182,11 +262,32 @@ Before starting, estimate total context cost for all waves. If >80%, reduce plan
 
 All confidence references in this document use this scale.
 
+**Outcome-Based Calibration:** Agent self-reported confidence is a starting signal, not ground truth. After each run, the orchestrator records what actually happened (tests passed, code compiled, user accepted result) in `~/.claude/hive-calibration.jsonl`. Over time, this builds a calibration curve:
+
+```json
+{"ts":"ISO","run_id":"...","agent_id":"scout-3","reported_confidence":0.93,"outcome":"verified","outcome_source":"tsc_pass+vitest_pass"}
+```
+
+Outcome sources (in priority order):
+1. **tsc_pass / tsc_fail** - type-check result (objective, best signal)
+2. **vitest_pass / vitest_fail** - test result (objective)
+3. **user_accepted / user_rejected** - user kept or reverted the change
+4. **no_verification** - no objective check available (research tasks)
+
+**Calibration adjustment:** Before using agent confidence for quorum, cross-inhibition, or chain calculations, check calibration history for that agent's model tier:
+```
+calibration_ratio = mean(outcomes where verified) / mean(reported_confidence for those runs)
+adjusted_confidence = reported_confidence * calibration_ratio
+```
+If fewer than 5 calibration entries exist for a model tier, use reported confidence as-is (insufficient data). Log: `Confidence adjusted: {reported} -> {adjusted} (calibration ratio: {ratio}, N={sample_size})`
+
+Prune calibration file to last 100 entries.
+
 ### Chain Confidence (pipelines only)
 ```
-chain_confidence = agent1_conf * agent2_conf * ... * agentN_conf
+chain_confidence = adj_conf_1 * adj_conf_2 * ... * adj_conf_N
 ```
-Threshold: 0.65. Never chain >8 agents (0.95^8 = 0.663, barely passes).
+Uses calibrated confidence (above), not raw self-reports. Threshold: 0.65. Never chain >8 agents.
 
 ### Agent TTL
 ```
@@ -213,6 +314,7 @@ When agents write files (code, config, docs), they can conflict if running in pa
 - Always when `--isolate` flag is set
 - Never in Lite mode unless `--isolate` is set (overhead not worth it for 1-3 tasks)
 - Never for read-only tasks (research, audits, searches) unless `--isolate` is set
+- **NEVER on Windows (win32) unless `--isolate` is explicitly set.** Worktree file delivery fails on Windows cleanup (confirmed in 3+ production runs). Default to direct writes with per-agent file coordination instead. Agents should write to different files or the orchestrator should merge sequentially.
 - Read-only heuristic: task contains none of these as whole words (word-boundary match, not substring): "fix", "refactor", "update", "create", "write", "modify", "add", "remove", "delete". Example: "address" does NOT match "add".
 
 **How it works:**
@@ -254,7 +356,7 @@ Agents in the next wave read from `.hive/shared-{run-id}.md` (read-only) and wri
 
 ### Concurrency Control
 
-Defaults: start at 5, max 15, scale up by 2 on clean waves, halve on errors.
+Defaults: start at 10, max 20 (writes) / 25 (reads). Scale up by 3 on clean waves, halve on errors. Proven ceiling (April 7, 2026): 25 read, 20 write, 15 mixed (2 opus + 4 sonnet + 9 haiku), zero failures across 161 agent launches.
 
 **Completion Velocity (TCP-inspired):**
 ```
@@ -290,7 +392,7 @@ Guideline: research agents should aim for 5-10 tool calls. Fix agents 10-20. Any
 
 ### Agent Prompts
 
-Every agent MUST include these two blocks:
+Every agent MUST include these blocks:
 
 **Self-Validation (end of prompt):**
 ```
@@ -300,6 +402,7 @@ Verify:
 2. Are all claims supported by evidence (not assumed)?
 3. Did you check the shared findings and avoid duplicating work?
 4. Rate confidence: HIGH / MEDIUM / LOW (see Confidence Scale in Step 7)
+5. Learnings: Name one technique that worked and one that didn't (1 sentence each, skip if nothing notable)
 
 Format:
 CONFIDENCE: [HIGH/MEDIUM/LOW]
@@ -329,6 +432,210 @@ Do NOT duplicate work already on the board.
 Budget: ~{words} words max. Prioritize findings over prose.
 ```
 
+**Skill Activation (top of prompt, after Shared Context):**
+
+Sub-agents skip the `using-superpowers` auto-bootstrap by design (its SUBAGENT-STOP clause). The orchestrator MUST therefore name relevant skills explicitly in each agent prompt, or the agent runs raw without process discipline. Map the agent's task to skills during planning and inject:
+```
+## Skills (MANDATORY — invoke via the Skill tool before acting)
+The using-superpowers auto-check does NOT fire for you. You must still use skills.
+Before doing the task, invoke these skills and follow them:
+{matched-skills}
+If none are listed, scan for a skill that fits your task (process skills first:
+brainstorming for design/new behavior, test-driven-development for any
+implementation, systematic-debugging for bugs/failures, then domain skills) and
+invoke it. A 1% chance it applies means invoke it.
+```
+
+**Task → skill mapping** (apply per-subtask during planning, inject the matches):
+- Implements a feature / writes code that changes behavior → `test-driven-development` (and `brainstorming` if design is open)
+- Bug, test failure, unexpected behavior, "why does X" → `systematic-debugging`
+- New component / page / UI / artifact → `frontend-design` + relevant design skill (`critique`, `polish`, etc.)
+- Supabase / DB / auth / migration / edge function work → `supabase:supabase`
+- PostHog instrumentation, flags, experiments, queries → matching `posthog:*` skill
+- Claude API / Anthropic SDK code → `claude-api`
+- Reviewing or merging work → `superpowers:requesting-code-review`, `superpowers:verification-before-completion`
+- Pure research / lookup / read-only summarize → no skill required (state "no skill: read-only")
+
+Keep the list tight: 1-3 skills per agent. Do not inject skills irrelevant to the agent's single task. Log per agent in the wave trace: `skills: [brainstorming, tdd]` or `skills: none (read-only)`.
+
+### Structured Agent Protocol (Mechanism 20)
+
+**Replace freeform agent output with a JSON contract.** This eliminates parse failures in stigmergy, quorum, and synthesis. Every agent prompt must include the output schema.
+
+**Agent output schema** (include in every agent prompt):
+```
+## Output Format (MANDATORY — return ONLY this JSON block, no prose before/after)
+Return your result as a single JSON code block:
+{
+  "agent_id": "string — your assigned agent ID",
+  "task": "string — one-line task description",
+  "confidence": 0.93,
+  "status": "done | failed | partial | handoff_fail",
+  "findings": ["string — one finding per array element, max 5"],
+  "result": "string — full output / implementation / answer",
+  "reasoning_steps": ["Step 1: ...", "Step 2: ..."],
+  "tradeoffs": "string — what you considered but rejected",
+  "files_changed": ["path/to/file.ts"],
+  "tool_calls_used": 8,
+  "needs_review": false,
+  "metadata": {},
+  "learnings": {
+    "worked": ["one-sentence technique that helped — skip if nothing notable"],
+    "failed": ["one-sentence technique that wasted time — skip if nothing notable"],
+    "tip": "optional one-sentence advice for the next agent doing this task_type"
+  }
+}
+```
+
+**Parsing rules:**
+1. Extract the JSON block from the agent's response (first `{` to last `}`)
+2. If JSON parse fails, fall back to regex extraction of CONFIDENCE/FINDINGS/RESULT fields
+3. If both fail, mark agent as `status: "failed"` with `confidence: 0.0`
+4. Log parse method in running log: `(parsed: json | regex | failed)`
+
+**Stigmergy writes use structured findings:**
+Instead of freeform `echo` to shared findings, agents append structured entries:
+```json
+{"agent_id": "scout-3", "finding": "carrier-lookup returns 404 for CA carriers", "confidence": 0.85, "category": "bug"}
+```
+The orchestrator merges these into `.hive/shared-{run-id}.jsonl` (one JSON per line). Next-wave agents read this structured board, enabling filtering by category or confidence.
+
+**Quorum uses structured comparison:**
+When comparing agent outputs for semantic quorum, the orchestrator extracts the `findings` arrays and compares them structurally (set overlap) before falling back to semantic similarity. This catches exact agreement faster and cheaper than spawning a Haiku classifier.
+
+### Adaptive Thinking Budget (Mechanism 21)
+
+**Scale reasoning depth per-agent based on task complexity.** Not every agent needs deep thinking.
+
+**Complexity classes:**
+| Class | Triggers | Thinking Instruction | Model Hint |
+|-------|----------|---------------------|------------|
+| **Shallow** | Lookup, status check, file read, formatting | "Answer directly, minimal reasoning" | `model: "haiku"` |
+| **Standard** | Single-file fix, test writing, search + summarize | (default, no special instruction) | `model: "sonnet"` |
+| **Deep** | Cross-service debugging, architecture decisions, security audit, multi-file refactor | "Think step-by-step. Consider edge cases. Trace the full call chain before proposing a fix." | `model: "opus"` |
+| **Extended** | Patent-level analysis, novel algorithm design, cross-repo root cause with 3+ systems | "Use extended reasoning. Map all dependencies before acting. Consider second-order effects." | `model: "opus"` |
+
+**Auto-detection rules** (applied per-subtask during planning):
+- Task mentions "debug", "trace", "root cause", "why does", "cross-service" -> Deep
+- Task mentions "architecture", "design", "security", "audit", "compliance" -> Deep
+- Task mentions "refactor", "migrate", "migration", "performance", "optimize" -> Deep
+- Task mentions "race condition", "deadlock", "regression", "data loss" -> Deep
+- Task mentions "check", "verify", "status", "list", "count" -> Shallow
+- Task mentions "fix", "update", "add", "test" (single file) -> Standard
+- Task involves 3+ repos or services -> Extended
+- Default: Standard
+
+Include the thinking instruction in the agent prompt. Include the model hint in the Agent tool call.
+
+### Context Deduplication (Mechanism 22)
+
+**Minimize redundant context loading across sub-agents.** In a 10-agent hive run, each agent re-reads the same CLAUDE.md, memory files, and shared context. This wastes tokens and slows startup.
+
+**Shared preamble pattern:**
+1. Before Wave 1, read all common context once (CLAUDE.md, relevant memory files, shared findings)
+2. Condense into a **shared preamble** (~200 lines max) containing only what agents need:
+   - Project architecture (from CLAUDE.md)
+   - Relevant file paths
+   - Known constraints and blockers
+   - Current deploy state
+   - Muscle memory entries for this task_type (from `~/.claude/hive-muscle.jsonl`)
+3. Inject the same preamble into every agent prompt (copy, don't reference)
+4. Agent-specific context (their unique task, known paths) goes AFTER the preamble
+
+**What NOT to include in preamble:**
+- Full CLAUDE.md (too long, most sections irrelevant to any given task)
+- Memory index (agents don't need it)
+- Git history (stale, agents can check themselves if needed)
+- Other agents' task descriptions (cross-contamination risk)
+
+**Dedup log:** Track preamble size. If >300 lines, trim. Log: `Preamble: {N} lines, {est_tokens} tokens (saved ~{savings}% vs full context per agent)`
+
+**Muscle memory injection (Mechanism 26):**
+
+Read `~/.claude/hive-muscle.jsonl` (skip if file doesn't exist, bootstrap will create it on first run). For each entry, compute effective strength:
+- Pinned entries: `effective_strength = strength`
+- Non-pinned: `effective_strength = strength * (0.92 ^ days_since_last_hit)`
+
+Filter: `effective_strength >= 0.25` AND (`task_type` matches current run OR `task_type == "universal"`). Sort by effective_strength descending. Select using slot reservation: up to 10 universal, up to 5 task-specific, backfill remaining from whichever pool has more. Max 15 total.
+
+Format and inject into shared preamble after project architecture, before agent-specific context:
+```
+## Muscle Memory (proven techniques for {task_type} tasks)
+Do: {positive technique}
+Avoid: {negative technique}
+...
+```
+
+Agents see only the distilled `Do:`/`Avoid:` lines, not IDs, strengths, or metadata. Max 20 lines.
+
+Log: `Muscle memory: {N} entries injected ({M} universal, {K} task-specific), strongest: "{top_technique}"`
+
+### Dynamic Tool Loading (Mechanism 23)
+
+**When the workspace has many MCP tools (20+), don't load all of them into every agent's context.** Most agents need 3-5 tools.
+
+**Tool selection per agent:**
+1. During planning, tag each subtask with required tool categories:
+   - `code`: Read, Edit, Write, Glob, Grep, Bash
+   - `web`: WebFetch, WebSearch
+   - `test`: Bash (test commands)
+   - `mcp`: specific MCP tools by name
+   - `browser`: Playwright tools
+   - `desktop`: God mode tools
+2. Include tool hints in the agent prompt:
+   ```
+   ## Available Tools (use only these)
+   You need: Read, Grep, Bash. Do not use browser or MCP tools for this task.
+   ```
+3. This is advisory (Claude Code loads all tools regardless), but it prevents agents from wandering into irrelevant tool calls. Agents that stay within their tool budget get higher efficiency scores.
+
+### Hot Reassignment (Mechanism 24)
+
+**When an agent times out or fails, don't just retry -- reassign its slot to the highest-priority waiting task.**
+
+**Activation:** Standard and Full mode only. Requires at least 1 task in the queue waiting for a slot.
+
+**Flow:**
+1. Agent hits TTL or returns `status: "failed"`
+2. Check the queue: is there a higher-priority task waiting?
+3. If yes: assign the freed slot to the waiting task. The failed task goes to the back of the queue (retried after the waiting task completes).
+4. If no: retry the failed task with a tighter prompt
+5. Log: `HOT REASSIGN: slot freed by agent-{id} (TTL) -> reassigned to task "{waiting_task}" (priority: {P})`
+
+**Priority scoring:**
+- Critical subtask (has redundancy): priority 3
+- Blocking subtask (other tasks depend on it): priority 2
+- Standard subtask: priority 1
+- Retry of a failed task: priority 0
+
+### Extended Reasoning Gates (Mechanism 25)
+
+**Automatically trigger deep reasoning for specific task patterns that benefit from chain-of-thought.**
+
+**Gate triggers** (auto-detected from task description):
+| Pattern | Gate | What Happens |
+|---------|------|-------------|
+| "why does X cause Y" | Causal | Agent must trace the full causal chain before answering |
+| "is this secure" / "audit" | Security | Agent must enumerate attack vectors systematically |
+| "debug" + 2+ service names | Cross-service | Agent must map the request flow across all named services |
+| "design" / "architect" | Architecture | Agent must list constraints, propose 2+ options, compare tradeoffs |
+| "performance" / "optimize" | Performance | Agent must profile before optimizing, not guess |
+
+**Gate instruction** (injected into agent prompt when triggered):
+```
+## Extended Reasoning Gate: {gate_type}
+Before answering, you MUST complete this reasoning protocol:
+1. Map: List every component/service involved
+2. Trace: Follow the data/request flow end-to-end
+3. Hypothesize: Form 2-3 hypotheses for the root cause
+4. Test: For each hypothesis, identify what evidence would confirm or reject it
+5. Conclude: State your conclusion with the supporting evidence chain
+
+Do NOT skip to a solution. The reasoning IS the deliverable.
+```
+
+**Interaction with Adaptive Thinking:** Extended Reasoning Gates override the complexity class to Deep or Extended. If a task triggers a gate, it always gets at minimum `model: "opus"`.
+
 ### Running Log
 
 Maintain `hive-log-{date}.md` at workspace root. Update after every agent:
@@ -341,6 +648,45 @@ Strategy: {strategy} | Protocol: {protocol} | Mode: {mode}
 - [TTL] Task 3 -- timeout, reassigned
 - [WARN] Task 4 -- result ok but 26 calls (inefficient, flag for review)
 ```
+
+### Debug Trace (Mechanism 27)
+
+Maintain `.hive/trace-{run-id}.jsonl` alongside the human-readable log. One JSON line per event. This makes post-run debugging searchable and machine-parseable.
+
+**Event types:**
+```json
+{"ts":"ISO","event":"mode_selected","mode":"standard","subtask_count":5}
+{"ts":"ISO","event":"strategy_selected","strategy":"fan-out-gather","reason":"independent research tasks"}
+{"ts":"ISO","event":"wave_start","wave":1,"agents":5,"concurrency":5,"reserve":2}
+{"ts":"ISO","event":"agent_complete","wave":1,"agent_id":"scout-3","status":"done","duration_ms":34200,"confidence":0.85,"adjusted_confidence":0.81,"tool_calls":8,"parse_method":"json"}
+{"ts":"ISO","event":"mechanism_fired","mechanism":"semantic_quorum","wave":1,"detail":"2/3 agents agreed, early commit","outcome":"accepted"}
+{"ts":"ISO","event":"mechanism_fired","mechanism":"cross_inhibition","wave":1,"detail":"scout-3 (0.85) dampened scout-1 (0.70)","outcome":"scout-3 wins"}
+{"ts":"ISO","event":"mechanism_fired","mechanism":"reasoning_tree","wave":1,"detail":"divergence at step 3: scout-1 assumed CA, scout-2 assumed US","outcome":"escalated to sonnet"}
+{"ts":"ISO","event":"mechanism_fired","mechanism":"backpressure","wave":1,"detail":"9 unread findings, spawning summarizer","outcome":"condensed to 4"}
+{"ts":"ISO","event":"mechanism_fired","mechanism":"hot_reassignment","wave":2,"detail":"slot freed by scout-4 (TTL) -> reassigned to task 'pricing analysis'","outcome":"completed"}
+{"ts":"ISO","event":"confidence_calibration","agent_id":"scout-3","reported":0.85,"adjusted":0.81,"calibration_ratio":0.95,"sample_size":12}
+{"ts":"ISO","event":"verification","type":"tsc","result":"pass","duration_ms":4500}
+{"ts":"ISO","event":"verification","type":"vitest","result":"fail","failures":["test/carrier.test.ts:42"],"duration_ms":12000}
+{"ts":"ISO","event":"wave_end","wave":1,"completed":4,"failed":1,"velocity":2.1,"budget_used":42,"budget_remaining":108}
+{"ts":"ISO","event":"run_complete","score":8.5,"total_agents":12,"passed":11,"failed":1,"waves":2,"duration_ms":245000}
+```
+
+**Rules:**
+- Write events as they happen, not batched at end (crash-safe)
+- Every mechanism activation MUST produce a trace event with `mechanism_fired` type
+- Include `detail` (what happened) and `outcome` (what was decided) on every mechanism event
+- If a mechanism was expected to fire but didn't (e.g., quorum skipped because only 1 agent), log: `{"event":"mechanism_skipped","mechanism":"semantic_quorum","reason":"only 1 agent on this subtask"}`
+- Prune trace files older than 7 days on each run start
+
+**Post-run summary:** After Step 10, append a summary line to the trace:
+```json
+{"ts":"ISO","event":"trace_summary","mechanisms_fired":["quorum","cross_inhibition","backpressure"],"mechanisms_skipped":["inspector","worktree"],"total_events":47,"calibration_entries_added":12}
+```
+
+**Debugging usage:** To investigate a bad run, read the trace file and filter:
+- All failures: filter `status: "failed"` or `result: "fail"`
+- Mechanism decisions: filter `event: "mechanism_fired"`
+- Confidence drift: filter `event: "confidence_calibration"` and compare reported vs adjusted
 
 ### Execution Trace (--verbose)
 
@@ -458,6 +804,19 @@ This addresses the Windows path resolution issues that caused lost changes in pr
 4. Write synthesis report with: summary, results by task, failures, mechanism activity
 5. Save report next to log file
 
+### 9b. Record Calibration Data
+
+After synthesis but before learning, record outcome-based calibration for every agent:
+0. **Bootstrap (MANDATORY first):** if `~/.claude/hive-calibration.jsonl` does not exist, create it: `touch ~/.claude/hive-calibration.jsonl`. Without this file, calibration_ratio defaults to 1.0 and adjusted_confidence math is dead code. Verified gap 2026-05-02: file did not exist despite 50+ runs.
+1. Run verification checks (tsc, vitest) if code was changed
+2. For each agent, append to `~/.claude/hive-calibration.jsonl`:
+```json
+{"ts":"ISO","run_id":"...","agent_id":"scout-3","model":"haiku","reported_confidence":0.93,"outcome":"verified","outcome_source":"tsc_pass+vitest_pass"}
+```
+3. If no objective verification is possible (research tasks), record `"outcome":"unverified","outcome_source":"no_verification"`
+4. At end of run, if user explicitly reverts or rejects output, update the most recent calibration entries for that run to `"outcome":"rejected","outcome_source":"user_rejected"`
+5. Prune to last 100 entries
+
 ## Step 10: Learn
 
 ### 10a. Append to History
@@ -467,31 +826,9 @@ One JSON line to `~/.claude/hive-history.jsonl` (create the file if it does not 
 {"ts":"ISO","task_type":"qa","strategy":"wide-parallel","score":8.5,"total":12,"passed":11,"failed":1,"waves":2,"concurrency":8,"duration_ms":245000,"lessons":"stigmergy prevented 3 duplicate tasks"}
 ```
 
-**Scoring:** `(passed/total)*6 + (no_throttles?1.5:0) + (fast?1:0) + (efficient_conflicts?0.5:0) + (quorum?0.5:0) + (good_stigmergy?0.5:0)`. Max 10.
+**Scoring:** `(passed/total)*6 + (no_throttles?1.5:0) + (fast?1:0) + (efficient_conflicts?0.5:0) + (quorum?0.5:0) + (good_stigmergy?0.5:0)`. Max 10. Bonus modifiers (informational, don't change the 10-point scale): `structured_parse_rate` (% of agents that returned valid JSON), `thinking_budget_accuracy` (% of agents whose complexity class matched actual difficulty), `context_dedup_savings` (estimated tokens saved by shared preamble), `tool_focus_rate` (% of agents that stayed within their assigned tool categories), `reassignment_count` (how many hot reassignments occurred and whether they improved throughput), `gates_fired` (how many extended reasoning gates triggered and whether gate-triggered agents scored higher confidence than non-gated agents on similar tasks).
 
 **Pruning:** Keep last 50 entries.
-
-### 10b. Sync to Traction Agent
-
-After any hive run that produces **research findings, competitive intelligence, pricing analysis, market data, or strategic decisions**, automatically update the traction agent's context file so `/traction` has the latest data.
-
-**When to sync:** The run's `task_type` is `research` and the findings contain actionable GTM data (pricing, competitors, verticals, customer insights, fraud statistics, market sizing).
-
-**How to sync:**
-1. Read `./hive-intel.md` in the project root (create if missing)
-2. Append a dated entry with the key findings:
-```markdown
-## [DATE] — [Hive task summary]
-- Key finding 1
-- Key finding 2
-- Implication for traction: [how this changes outreach/positioning/pricing]
-```
-3. Keep file under 200 lines (prune oldest entries when exceeded)
-4. Log: `TRACTION SYNC: appended N findings to hive-intel.md`
-
-The traction agent reads `hive-intel.md` at the start of every run (Phase 1) to incorporate the latest research into content generation. This creates a feedback loop: hive researches, traction acts on it.
-
-**Skip sync when:** task_type is `qa`, `implementation`, or the run produced no research findings.
 
 ### 10c. Update Playbook
 
@@ -501,21 +838,229 @@ Record effective approaches with time-decay: `relevance = confidence * (0.95 ^ d
 
 **Auto-Unpin:** If a pinned strategy scores below 6.0 on 2 consecutive runs, unpin it automatically. This prevents stale pins from polluting the playbook when conditions change (new codebase, different task types, etc.).
 
+**Regression Detection:** After scoring each run, compare against the rolling average for that `task_type + strategy` combination from the last 5 runs:
+```
+rolling_avg = mean(last_5_scores_for_this_task_type_and_strategy)
+if score < rolling_avg - 2.0:
+  log: "REGRESSION: {task_type}/{strategy} scored {score} vs rolling avg {rolling_avg} (delta: -{diff})"
+  log: "Possible causes: changed codebase, stale playbook entry, context pollution, agent prompt drift"
+  flag in the running log with [REGRESSION] tag
+```
+This catches gradual quality degradation that individual run scores don't surface. A strategy that averaged 9.0 but suddenly scores 6.5 is a signal something changed. The flag is informational, not blocking, so it doesn't halt the run.
+
 Playbook entry format:
 ```json
 {"strategy":"wide-parallel","task_type":"qa","score_history":[8.5,9.0,8.2],"pinned":true,"pinned_at":"ISO"}
 ```
+
+### 10d. Update Muscle Memory
+
+After scoring, extract agent-level technique learnings into `~/.claude/hive-muscle.jsonl` (create if missing).
+
+Muscle memory complements the playbook: playbook tracks **strategies** (wide-parallel, hybrid, fan-out-gather), muscle memory tracks **techniques** (how agents do their work within any strategy). An entry should never describe a strategy -- that belongs in 10c.
+
+**Extract from agents:**
+1. For each agent with a `learnings` block in its output:
+   - `worked[]` items become positive entries, `failed[]` become negative entries
+   - Search existing entries for semantic match (same task_type + similar technique text)
+   - Match found + run score >= 7.0: **reinforce** -- `strength = min(1.0, strength + 0.2*(1-strength))`, increment hits, update last_hit, append score to source_scores (keep last 5)
+   - Match found + run score < 6.0: **contradict** -- `strength = max(0.0, strength - 0.3)`
+   - No match + run score >= 7.0: **create** new entry with strength 0.5, hits 1
+   - No match + run score < 7.0: **discard** (don't learn from mediocre runs)
+
+**Extract from run patterns (implicit learnings):**
+- All agents returned valid JSON (structured_parse_rate = 100%): reinforce "structured JSON output protocol eliminates parse failures"
+- Worktree file delivery failed: reinforce "avoid worktree on Windows, use direct writes to absolute paths"
+- concurrency:1 outperformed prior parallel run on same task_type: reinforce "sequential beats parallel for {task_type} when files overlap"
+- Stigmergy prevented duplicate work (detectable from shared findings): reinforce "read shared findings board before starting work"
+
+**Auto-pin:** `hits >= 4 AND mean(source_scores) >= 8.5` -> set `pinned: true, pin_review_after: now + 21 days`
+**Auto-unpin:** last 2 source_scores both < 7.0 -> set `pinned: false`
+**Pin review (stale pin defense):** On every run, check all pinned entries for `pin_review_after < now`. Flag expired pins in the log: `[PIN REVIEW] "{technique}" pinned {N} days ago, due for review. Run a holdout test or manually verify.` If a pinned entry passes review, reset `pin_review_after` to now + 21 days. The `/dream` skill should also flag overdue pin reviews.
+
+**Holdout testing (echo chamber defense):** Every 10th hive run (check run count in hive-history.jsonl), suppress muscle memory injection entirely. Compare the holdout run's score to the rolling average. If holdout score >= rolling average, log: `[HOLDOUT] Score {holdout} >= avg {rolling}. Muscle memory may not be helping. Review high-strength entries.` If holdout score is 1.5+ points higher than avg, flag all injected entries for strength reduction.
+
+**Slot reservation (crowding defense):** When selecting top 15 entries for injection, reserve at least 5 slots for task-specific entries. Fill order: (1) up to 10 universal entries by effective_strength, (2) up to 5 task-specific entries, (3) backfill remaining slots from whichever pool has more. This prevents universal entries from permanently shadowing specialized knowledge.
+
+**Consolidation (inline, no agents spawned):**
+Trigger when entry count > 50 OR every 5th hive run:
+1. **Prune stale:** Delete entries with `effective_strength < 0.1`
+2. **Merge duplicates:** Same task_type + same valence + same technique (semantic match) -> sum hits, keep higher strength, union source_scores (cap at 5)
+3. **Resolve contradictions:** If positive and negative entries describe the same technique for the same task_type: if one side has 2x the hits, delete the weaker side. If roughly equal, keep both (system is genuinely unsure).
+4. **Promote universals:** If a technique appears across 3+ task_types with same valence, create a `"universal"` entry and delete the task-type-specific ones
+5. **Rewrite file** (overwrite, not append)
+
+Cap at 50 entries. Log: `Muscle memory: {N} entries ({new} new, {reinforced} reinforced, {contradicted} contradicted, {pruned} pruned)`
+
+**Bootstrap (first run only):** If `hive-muscle.jsonl` does not exist, extract technique learnings from `hive-history.jsonl` entries with score >= 7.5. Parse the `lessons` field into 1-2 technique-level learnings per entry. Create with strength 0.5, hits 1. Run consolidation to merge duplicates. Log: `BOOTSTRAP: created {N} muscle memory entries from hive-history.jsonl`
+
+Entry format:
+```json
+{"id":"m-001","task_type":"qa","technique":"explicit attack categories beat open-ended try-to-break-it","valence":"positive","strength":0.85,"hits":3,"last_hit":"ISO","created":"ISO","source_scores":[9.5,9.0],"pinned":false,"pin_review_after":null}
+```
+
+### 10e. Exit Gate (MANDATORY — verify before returning final report)
+
+**Self-improvement is only real if the writes actually happen.** Audit on 2026-05-02 found `hive-calibration.jsonl` did not exist after 50+ runs and `hive-muscle.jsonl` had not been touched since 2026-04-07 despite ongoing runs. Steps 9b/10a/10c/10d were treated as suggestions, not requirements. This gate fixes that.
+
+Before returning the synthesis report to the user, verify and log each of these writes:
+
+```
+EXIT GATE
+[ ] hive-history.jsonl     → appended 1 entry  ({wc -l before/after})
+[ ] hive-calibration.jsonl → appended N entries  (one per agent in this run)
+[ ] hive-muscle.jsonl      → +K new / R reinforced / C contradicted / P pruned
+[ ] hive-playbook.json     → updated entry for ({strategy}, {task_type})
+```
+
+**Rules:**
+1. If a file does not exist, **create it before writing** (`touch ~/.claude/hive-{name}.jsonl`). Never silently skip due to missing file.
+2. If extraction yields no muscle-memory entries (e.g. all agents had empty `learnings`), still log: `[EXIT GATE] hive-muscle.jsonl: no notable learnings this run (reason: {why})`. The visible no-op proves the step ran.
+3. If any write fails for a real reason (disk full, permission denied), surface it: `[EXIT GATE FAIL] {file}: {reason}`. Do not bury in trace.
+4. The exit gate runs even on partial completion. Failed runs still produce calibration data ("what didn't work" is the most valuable signal).
+5. If the run was a `--dry-run`, skip the gate entirely. Log: `[EXIT GATE] skipped (dry-run)`.
+
+The orchestrator's final user-facing message MUST include a one-line confirmation:
+```
+Self-improvement: history+1, calibration+{N}, muscle+{K}/-{C}, playbook updated.
+```
+
+This makes the loop visible. If the user sees `calibration+0` they know the gate ran but no agents had verifiable outcomes — different from the gate silently skipping.
 
 ## Guidelines
 
 - Launch agents in a SINGLE message for true parallelism
 - Give each agent full context to work independently
 - One clear task per agent
-- Sonnet for grunt work, Opus for synthesis/analysis
+- **Model selection via Adaptive Thinking (Mechanism 21)**: Haiku for shallow, Sonnet for standard, Opus for deep/extended. Do NOT default everything to Sonnet.
 - Every agent MUST include self-validation + stigmergy blocks
+- Every agent MUST include the Skill Activation block (sub-agents skip the using-superpowers auto-bootstrap; the orchestrator names skills explicitly per task — see Agent Prompts → Skill Activation)
+- Every agent MUST include the structured output JSON schema (Mechanism 20)
 - Every agent MUST include tool-call budget and known paths (see Agent Efficiency Rules)
+- **Context dedup (Mechanism 22)**: Build a shared preamble ONCE before Wave 1. Inject it into every agent prompt. Do NOT have agents re-read CLAUDE.md individually.
 - Anthropic ceiling: 4 specialists x 5 tasks = 20 work units max
 - Run `/clear` between unrelated swarm runs
 - For overnight: start at 8+ concurrency. For interactive: start at 3-4.
-- **Efficiency tracking**: Log tool calls per agent in the running log. Flag agents exceeding 25 calls for review. Pattern: `(45s, HIGH, 8 calls)` in log entries.
+- **Efficiency tracking**: Log tool calls per agent in the running log. Flag agents exceeding 25 calls for review. Pattern: `(45s, HIGH, 8 calls, json)` in log entries (include parse method).
+- **Tool budget enforcement**: After each agent returns, check `usage.tool_uses` against the budget given in the prompt. If actual > 2x budget, log `[WARN] Agent {id} used {N} calls (budget was {B}, 2x threshold breached)` in the running log. Track cumulative tool calls across the run. If total exceeds 150, warn in the wave trace. Agents that exceed 2x budget on consecutive runs for the same task type should have their budget tightened by 30% in the playbook.
 - **Prefer precision over exploration**: If the orchestrator can answer a sub-question itself in 1-2 tool calls, do it inline instead of spawning an agent.
+- **Extended reasoning (Mechanism 25)**: When a gate triggers, the reasoning protocol is non-negotiable. Do not let agents skip the Map/Trace/Hypothesize/Test/Conclude steps.
+- **Hot reassignment (Mechanism 24)**: Always check the queue before retrying a failed agent. A waiting high-priority task beats retrying a low-priority failure.
+- **Dynamic tool loading (Mechanism 23)**: Tag each subtask with tool categories during planning. Include tool hints in agent prompts to prevent wandering into irrelevant tools. Especially important when MCP toolset exceeds 20 tools.
+- **Structured stigmergy**: Use `.jsonl` for shared findings (one JSON per line). Agents filter by category/confidence when reading. This replaces the old freeform `echo` pattern.
+- **Muscle memory (Mechanism 26)**: Inject top-15 technique learnings into shared preamble for Standard/Full mode. Agents report what worked/failed in the `learnings` JSON field. Step 10d extracts and reinforces. Playbook = strategies, muscle memory = techniques. Keep entries under 50.
+
+## Compaction Resilience (durable state, not blocking)
+
+**Old approach (deprecated 2026-05-01):** A PreCompact hook blocked /compact while a `hive-active` flag existed. This was removed because (a) flags got orphaned across sessions, (b) blocking compaction is hostile when context is genuinely full, and (c) it gave a false sense of safety — context can still hit hard limits and force compaction anyway.
+
+**New approach:** Assume compaction WILL happen. Make state survive it.
+
+### 1. Durable state on disk (everything important lives in files)
+
+At the start of every /hive run, before spawning any agents:
+
+```bash
+RUN_ID="hive-$(date '+%Y%m%dT%H%M%S')-$$"
+mkdir -p .hive/{checkpoints,findings,agents,state}
+date '+%Y-%m-%dT%H-%M-%S' > ~/.claude/hive-active   # informational marker only
+echo "$RUN_ID" > .hive/state/current-run.txt
+```
+
+The `hive-active` file is now informational only (no hook reads it). It exists so a future session can detect "a hive was running here" and offer to resume.
+
+### 2. Write-ahead findings (agent output survives compaction)
+
+**Every agent result goes to disk as soon as you receive it**, before you do anything else with it. Compaction can happen between you reading the result and you acting on it. If the result isn't on disk yet, it's gone.
+
+```bash
+# After EVERY agent result returns:
+cat > .hive/findings/wave{N}-agent{ID}.json <<'EOF'
+{ "agent_id": "...", "wave": N, "task": "...", "result": "...", "confidence": 0.93, "ts": "..." }
+EOF
+```
+
+Findings are append-only — never overwrite, never delete mid-run. If you need to update a finding, write a new file with `-v2` suffix.
+
+### 3. Pre-compaction snapshot (proactive handoff)
+
+Watch context usage. **At ~65-70% context, write a full handoff snapshot.** Don't wait for the hard ceiling — by then there's no room to write a clean handoff.
+
+The snapshot contains everything a fresh orchestrator needs to resume:
+
+```json
+{
+  "run_id": "hive-...",
+  "started_at": "...",
+  "mode": "Standard|Full|Lite",
+  "strategy": "fan-out-gather",
+  "task": "<original user task verbatim>",
+  "current_wave": 2,
+  "completed_waves": [
+    { "wave": 1, "agents": [...], "findings_files": [...], "summary": "..." }
+  ],
+  "in_flight_agents": [
+    { "agent_id": "...", "task": "...", "spawned_at": "...", "expected_ttl_sec": 180, "status": "running|complete|unknown" }
+  ],
+  "pending_waves": [...],
+  "decisions_made": [
+    { "decision": "...", "reasoning": "...", "ts": "..." }
+  ],
+  "open_questions": [],
+  "next_action": "Wait for wave 2 agents, then synthesize into report at <path>",
+  "user_constraints": ["strict mode", "real DB tests not mocked", "honest reporting"]
+}
+```
+
+Save to `.hive/checkpoints/<RUN_ID>-snapshot.json` AND `.hive/state/latest-snapshot.json` (symlink-style copy for easy lookup).
+
+### 4. Resume protocol (after compaction or new session)
+
+When a session starts (or context gets reset) and `~/.claude/hive-active` exists:
+
+1. Read `.hive/state/current-run.txt` to find the run ID
+2. Read `.hive/state/latest-snapshot.json` for orchestrator state
+3. Read all `.hive/findings/wave*-*.json` files for agent results
+4. Reconcile: any in-flight agents that should have finished by `spawned_at + expected_ttl_sec`? Mark them `unknown` and either re-spawn or skip based on criticality
+5. Resume from `next_action`. Do NOT re-run completed waves — agent calls are expensive and findings are already on disk.
+
+If the user pasted a `/hive --resume` after a manual compaction, follow the same protocol.
+
+### 5. Snapshot triggers
+
+Write a fresh snapshot at every one of these events:
+- After every wave completes (between waves is the natural checkpoint)
+- After every red-team / synthesis / reviewer agent returns
+- When context usage crosses 65% (proactive)
+- Before any user-visible action that would be expensive to repeat (deploy, send email, write big file)
+- On any agent failure (preserve state before recovery decisions)
+
+### 6. Long-running task handoff (the "agent died in compaction" case)
+
+The fear: orchestrator launches an agent, conversation gets compacted, orchestrator no longer remembers the agent exists, agent finishes alone with no one to consume its result.
+
+**Mitigation:** Agents in long hive runs MUST write their final result to `.hive/findings/wave{N}-agent{ID}.json` themselves before returning. The agent's prompt explicitly includes:
+
+```
+Before you return your final summary, write your full result to:
+  .hive/findings/wave{WAVE_N}-agent{AGENT_ID}.json
+
+Format: {"agent_id": "...", "wave": N, "task": "...", "result": "...", "confidence": 0.0-1.0, "learnings": [...], "ts": "<ISO>"}
+
+Do this even if the orchestrator never asks for it. If the conversation gets compacted while you're working, this file is the only way your work survives.
+```
+
+This makes agent output durable even if the orchestrator forgets the agent.
+
+### 7. Cleanup (only on confirmed completion)
+
+When the run completes successfully and the user has the final report:
+
+```bash
+rm -f ~/.claude/hive-active
+mv .hive/state/current-run.txt .hive/state/last-run-$(date '+%Y%m%dT%H%M%S').txt
+```
+
+Keep `.hive/findings/` and `.hive/checkpoints/` — they're the audit trail.
+
+If you abort (red team fail, fatal error, user interrupt), do NOT remove `~/.claude/hive-active` — leave it so the next session can offer to resume. Only the user's explicit "abandon this run" should clear the marker.
