@@ -32,7 +32,7 @@ You are the Hive Orchestrator. You break work into parallel subtasks, spawn Clau
 | 20 | Structured Agent Protocol | Agent SDK research | JSON-schema contracts for agent I/O, eliminating parse failures |
 | 21 | Adaptive Thinking Budget | Cognitive load theory | Scale reasoning depth per-agent based on task complexity class |
 | 22 | Context Deduplication | Prompt caching research | Minimize redundant context across sub-agents via shared preambles |
-| 23 | Dynamic Tool Loading | MCP scaling patterns | Load only relevant tools per agent instead of full toolset |
+| 23 | Dynamic Tool Loading | ToolSearch / deferred tools | Agents ToolSearch for the exact deferred MCP/web tools they need instead of carrying the full toolset |
 | 24 | Hot Reassignment | Ant task switching | Reassign idle/stuck agent slots to blocked high-priority tasks |
 | 25 | Extended Reasoning Gates | Chain-of-thought research | Trigger deep reasoning mode for cross-service debugging and architecture |
 | 26 | Muscle Memory | Procedural memory research | Agent-level technique learning persists across sessions with reinforcement decay |
@@ -66,6 +66,8 @@ Auto-detect, don't ask. Log which mode was selected.
 ## Step 2: Concurrency Profile (adaptive, learns from every run)
 
 The orchestrator maintains a concurrency profile at `~/.claude/projects/*/memory/swarm_rate_profile.json`. This profile is updated after every run with observed successes and failures per model mix.
+
+> **STALE-DATA NOTICE (recalibrate):** The ceilings, latency tables, and "proven configs" below are illustrative numbers measured against an earlier model generation. Model latency improves over generations — treat the per-model latency numbers as upper bounds, not targets — and the "ration the top-tier model, default to the cheapest for parallelism" bias weakens as the top model gets faster. Trigger a fresh **calibration run** (Step 2 → Calibration Runs) on your next real `/hive` invocation to overwrite this data with current-stack numbers. Until then, the flat-agent-count safety rule (`total_agents <= 13`) still holds and is model-generation-independent.
 
 ### Concurrency Profile Format
 ```json
@@ -217,7 +219,7 @@ Display: `Strategy: fan-out-gather | 8 scouts -> 1 synthesizer | Protocol: conse
 1. Break task into independent, self-contained subtasks
 2. Group into waves (dependencies between waves, parallelism within)
 3. **Reserve Pool**: Hold back ~25% of concurrency as reserve. Release reserve when: (a) all planned agents are queued and none are waiting, (b) a wave has 0 failures and velocity is above expected rate, or (c) the final wave needs extra capacity. Reserve is never released during error recovery.
-4. If >8 agents planned, confirm with user: "This will launch ~{N} agents. Proceed?"
+4. If >8 agents planned, confirm via the `AskUserQuestion` tool (not a freeform prompt). Header "Launch", question "Plan launches ~{N} agents across {W} waves (est. {cost}). Proceed?", options: "Launch all {N}", "Reduce to 8 (one wave)", "Dry-run first". Act on the choice. Freeform "Proceed?" is deprecated — the structured gate is cleaner and the choice is logged.
 
 ### Redundancy Planning (activates quorum, cross-inhibition, and inspectors)
 
@@ -366,15 +368,38 @@ expected_rate = total / estimated_minutes
 - completions > expected * 1.3: Scale up (headroom detected)
 - completions < expected * 0.6: Scale down (approaching limits)
 
+### Background Waves (run_in_background)
+
+The Agent tool supports `run_in_background: true`. A backgrounded agent is **harness-tracked**: the orchestrator is auto-notified when it completes, with no polling, sleeping, or blocking. This directly fixes the "agent died in compaction" failure mode (see Compaction Resilience §6) — the harness, not the orchestrator's memory, owns the agent's lifecycle.
+
+**When to background a wave:**
+- **Long unattended runs** (overnight, autonomous loops): background every wave. The orchestrator stays responsive and gets pinged per completion instead of stalling on the slowest agent.
+- **Mixed-latency waves**: if one heavy agent will run 100s+ alongside fast lightweight agents, background the slow one so the fast results land first and the wave doesn't block on the tail.
+- **Deep/Extended complexity agents** (architecture, cross-service debug): background them; consume their result when the notification fires.
+
+**When NOT to background:**
+- **Interactive Lite-mode runs** where you want the result immediately to steer the next step. Foreground is simpler and the latency is low.
+- **Tight pipelines** where the very next wave needs this agent's output before it can start. Foreground so the dependency is explicit.
+
+**Rules:**
+- Do NOT sleep or poll waiting for a backgrounded agent. You are notified on completion — continue other work or, if nothing else is pending, end the turn and resume when pinged.
+- Backgrounded agents still MUST write their result to `.hive/findings/wave{N}-agent{ID}.json` themselves (Compaction Resilience §6). The notification is the fast path; the file is the durable path.
+- Log in the wave trace: `agent-3: backgrounded (deep)`.
+- Reserve-pool and velocity math are unchanged — a backgrounded agent still counts toward the concurrency total.
+
 ### Agent Efficiency Rules
 
 Agents must be **directed, not exploratory**. Wasted tool calls burn context and time.
 
-**Agent type selection:**
-- Use `general-purpose` agents (default) for tasks that require action (fixes, writes, analysis with output)
-- Use `Explore` agents ONLY when paths/locations are genuinely unknown and broad search is needed
-- NEVER use `Explore` for files in known locations (e.g., `~/.claude/`, project config, files referenced in memory or shared findings)
-- For read-heavy tasks on known files, use `general-purpose` with explicit file paths in the prompt
+**Agent type selection (use the specialized `subagent_type`, not generic `general-purpose`, when a role matches):**
+- `general-purpose` — default for action tasks that don't fit a specialist (mixed fix + write + analyze).
+- `Explore` — ONLY when paths/locations are genuinely unknown and broad search is needed. NEVER for files in known locations (`~/.claude/`, project config, files referenced in memory or shared findings). For read-heavy tasks on known files, use `general-purpose` with explicit file paths.
+- `feature-dev:code-explorer` — deep tracing of an existing feature's execution path / architecture before changing it. Better than `Explore` when the goal is to *understand* a known subsystem, not just locate files.
+- `feature-dev:code-architect` — designing a feature's implementation blueprint (files to create/modify, data flow, build sequence). Use for the "architecture decision" critical-subtask class instead of a raw general-purpose agent.
+- `feature-dev:code-reviewer` — reviewing a diff / merged worktree branch for bugs, security, convention drift. Use this for the Between-Waves review step and any "review or merge work" subtask.
+- `Plan` — producing a step-by-step implementation plan with trade-offs for a complex task. Use when a subtask is "plan how to do X" rather than "do X".
+
+Map the role during planning and pass it as `subagent_type` on the Agent call. Log it in the wave trace: `agent-3: code-reviewer`. Specialized agents carry tighter tool sets and role-tuned prompts, so they finish faster and hallucinate less than a generic agent doing the same job. (Specialized agent types depend on which plugins are installed; fall back to `general-purpose` when a named type isn't available.)
 
 **Tool-call budget:** Include a tool-call budget in every agent prompt:
 ```
@@ -572,22 +597,26 @@ Log: `Muscle memory: {N} entries injected ({M} universal, {K} task-specific), st
 
 ### Dynamic Tool Loading (Mechanism 23)
 
-**When the workspace has many MCP tools (20+), don't load all of them into every agent's context.** Most agents need 3-5 tools.
+**MCP tools are now deferred behind `ToolSearch`.** In a workspace with many MCP servers connected, the harness does NOT load every tool schema up front. Each deferred tool appears by name only; an agent must call `ToolSearch` to fetch its schema before it can invoke it. This makes tool loading real, not advisory: an agent that never searches for a tool never pays its context cost.
 
 **Tool selection per agent:**
-1. During planning, tag each subtask with required tool categories:
-   - `code`: Read, Edit, Write, Glob, Grep, Bash
-   - `web`: WebFetch, WebSearch
-   - `test`: Bash (test commands)
-   - `mcp`: specific MCP tools by name
-   - `browser`: Playwright tools
-   - `desktop`: God mode tools
-2. Include tool hints in the agent prompt:
+1. During planning, tag each subtask with the tools it actually needs:
+   - **Always-loaded core** (no search needed): Read, Edit, Write, Glob, Grep, Bash, Agent, TaskCreate/Update
+   - **Deferred** (must `ToolSearch` first): WebFetch, WebSearch, browser automation tools, every `mcp__*` tool, NotebookEdit, scheduling/monitoring tools
+2. If a subtask needs ONLY core tools, say so explicitly so the agent does not waste a search:
    ```
-   ## Available Tools (use only these)
-   You need: Read, Grep, Bash. Do not use browser or MCP tools for this task.
+   ## Tools
+   You need only core tools (Read, Grep, Bash). Do NOT call ToolSearch — everything you need is already loaded.
    ```
-3. This is advisory (Claude Code loads all tools regardless), but it prevents agents from wandering into irrelevant tool calls. Agents that stay within their tool budget get higher efficiency scores.
+3. If a subtask needs a deferred tool, name it AND the search query so the agent fetches the schema in one shot:
+   ```
+   ## Tools (deferred — load these first)
+   Before acting, run: ToolSearch with query "select:mcp__<server>__<tool_a>,mcp__<server>__<tool_b>"
+   Then use those tools. Do not search for tools outside this list.
+   ```
+4. Prefer the exact `select:<name1>,<name2>` form when you know the tool names (zero-ambiguity, one call). Use keyword search only when the agent must discover which tool fits.
+
+**Why this matters now:** with a large deferred toolset in the environment, an agent that keyword-searches loosely can pull a dozen irrelevant schemas and blow its context + tool budget. Naming the exact `select:` query keeps each agent lean. Log per agent in the wave trace: `tools: core-only` or `tools: deferred[<server> x2]`.
 
 ### Hot Reassignment (Mechanism 24)
 
@@ -946,7 +975,7 @@ This makes the loop visible. If the user sees `calibration+0` they know the gate
 - **Prefer precision over exploration**: If the orchestrator can answer a sub-question itself in 1-2 tool calls, do it inline instead of spawning an agent.
 - **Extended reasoning (Mechanism 25)**: When a gate triggers, the reasoning protocol is non-negotiable. Do not let agents skip the Map/Trace/Hypothesize/Test/Conclude steps.
 - **Hot reassignment (Mechanism 24)**: Always check the queue before retrying a failed agent. A waiting high-priority task beats retrying a low-priority failure.
-- **Dynamic tool loading (Mechanism 23)**: Tag each subtask with tool categories during planning. Include tool hints in agent prompts to prevent wandering into irrelevant tools. Especially important when MCP toolset exceeds 20 tools.
+- **Dynamic tool loading (Mechanism 23)**: MCP/web tools are deferred behind `ToolSearch`. During planning, tag each subtask as core-only or name the exact deferred tools it needs. Inject a `select:<name1>,<name2>` ToolSearch query into the agent prompt so it loads schemas in one call. Critical when the environment carries a large deferred toolset — loose keyword searches pull irrelevant schemas and blow the agent's context budget.
 - **Structured stigmergy**: Use `.jsonl` for shared findings (one JSON per line). Agents filter by category/confidence when reading. This replaces the old freeform `echo` pattern.
 - **Muscle memory (Mechanism 26)**: Inject top-15 technique learnings into shared preamble for Standard/Full mode. Agents report what worked/failed in the `learnings` JSON field. Step 10d extracts and reinforces. Playbook = strategies, muscle memory = techniques. Keep entries under 50.
 
@@ -1039,7 +1068,9 @@ Write a fresh snapshot at every one of these events:
 
 The fear: orchestrator launches an agent, conversation gets compacted, orchestrator no longer remembers the agent exists, agent finishes alone with no one to consume its result.
 
-**Mitigation:** Agents in long hive runs MUST write their final result to `.hive/findings/wave{N}-agent{ID}.json` themselves before returning. The agent's prompt explicitly includes:
+**Primary mitigation (new): background the agent.** A `run_in_background: true` agent is harness-tracked — the harness re-invokes the orchestrator with the agent's result when it finishes, even across compaction, so the agent can never "finish alone." Prefer this for any long-running agent (see Background Waves above). The disk-write below is the belt-and-suspenders backup.
+
+**Backup mitigation:** Agents in long hive runs MUST write their final result to `.hive/findings/wave{N}-agent{ID}.json` themselves before returning. The agent's prompt explicitly includes:
 
 ```
 Before you return your final summary, write your full result to:
