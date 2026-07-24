@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cipherandrow",
+  "description": "Cipher & Row public Claude Code plugins",
+  "owner": {
+    "name": "Jack Nowlan",
+    "email": "jack@cipherandrow.com"
+  },
+  "plugins": [
+    {
+      "name": "hive",
+      "source": "./",
+      "description": "Bio-inspired swarm orchestrator (/hive), persona-driven review of any artifact (/hiverev), and 7-phase strategic wargame engine (/hivesim)."
+    }
+  ]
+}

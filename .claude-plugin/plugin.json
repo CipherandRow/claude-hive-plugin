@@ -1,7 +1,7 @@
 {
   "name": "hive",
-  "version": "1.0.0",
-  "description": "Bio-inspired swarm orchestrator for Claude Code. Breaks tasks into parallel subtasks, coordinates agents through stigmergy, learns across sessions with pheromone scoring, and scales concurrency adaptively.",
+  "version": "1.1.0",
+  "description": "Bio-inspired swarm orchestrator for Claude Code, plus two companion skills: /hiverev (persona-driven review of any artifact from any angle) and /hivesim (7-phase strategic wargame engine with red team and pre-mortem).",
   "author": {
     "name": "Jack Nowlan",
     "email": "jack@cipherandrow.com"

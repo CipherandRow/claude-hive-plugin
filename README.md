@@ -6,6 +6,14 @@ A multi-agent orchestration skill that coordinates parallel Claude Code agents u
 
 `/hive <task>` breaks your task into subtasks, spawns agents in parallel waves, coordinates them through shared findings, resolves conflicts, and learns from each run.
 
+## Skills in This Plugin
+
+| Skill | What it does |
+|-------|--------------|
+| `/hive` | Parallel swarm orchestration for execution tasks: research, fixes, refactors, audits. |
+| `/hiverev` | Persona-driven review of any artifact from any angle: a UI, a landing page, a cold email, a README, a pitch deck, a flow. Pick who is looking and what lens they bring, get a prioritized friction punch list. Runs in-context, no sub-agents. |
+| `/hivesim` | Strategic wargame engine. 7 phases: scout, decompose, quantitative buyer sim (10-15 personas), deep buying journeys, 3-adversary red team with FATAL verification, pre-mortem, and a one-page Go/No-Go Decision Brief with kill criteria. |
+
 ## What's New in v4.0 (April 8, 2026)
 
 - **Concurrency unlocked**: Old limit was 2 heavy agents (from a March 2026 incident). Stress-tested to 25 read / 20 write / 15 mixed agents with zero failures across 161 launches. Default start concurrency raised from 5 to 10.
@@ -43,11 +51,14 @@ A multi-agent orchestration skill that coordinates parallel Claude Code agents u
 
 ## Installation
 
+In Claude Code:
+
 ```
-/plugin install hive@claude-plugins-official
+/plugin marketplace add CipherandRow/claude-hive-plugin
+/plugin install hive@cipherandrow
 ```
 
-Or manually copy the skill into your `~/.claude/skills/hive/` directory.
+Or manually copy any skill folder from `skills/` into your `~/.claude/skills/` directory.
 
 ## Usage
 
@@ -142,6 +153,7 @@ DO NOT add inline comments, refactor, or change code outside the task.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.2 | July 23, 2026 | Added /hiverev (persona-driven review of any artifact) and /hivesim (strategic wargame engine) skills |
 | v4.1 | April 9, 2026 | Full concurrency test suite (78 agents, 0 errors), flat ceiling model replaces weighted tokens |
 | v4.0 | April 8, 2026 | Concurrency unlocked (2->25), mechanism audit, cross-skill sync |
 | v3.0 | March 25, 2026 | 14 mechanisms, semantic quorum, reasoning tree, A2A protocol |
